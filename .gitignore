@@ -1,0 +1,13 @@
+# 本機資料庫
+*.db
+
+# 機密與環境設定
+.env
+
+# macOS
+.DS_Store
+
+# 編譯產物
+/server
+/main
+*.test

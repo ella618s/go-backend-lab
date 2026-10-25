@@ -1,35 +1,35 @@
 package main
 
 import (
-	"go-backend-lab/database"
-	"go-backend-lab/handlers"
-	"go-backend-lab/middlewares"
+	"log"
+	"os"
 
-	"github.com/gin-gonic/gin"
+	"go-backend-lab/database"
+	"go-backend-lab/middlewares"
+	"go-backend-lab/router"
 )
 
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
-	// 1. 初始化資料庫
-	database.InitDB()
+	// 1. 設定 JWT 密鑰（必須由環境變數提供）
+	if err := middlewares.SetJWTSecret(os.Getenv("JWT_SECRET")); err != nil {
+		log.Fatal(err)
+	}
 
-	// 2. 初始化 Gin 路由器
-	r := gin.Default()
-
-	// --- 公開路由 (不需要 Token 就能存取) ---
-	r.POST("/api/register", handlers.Register)
-	r.POST("/api/login", handlers.Login)
-	r.POST("/api/heavy-task", handlers.HeavyTask)
-
-	// --- 受保護的路由群組 (必須通過 AuthMiddleware 安檢門才能存取) ---
-	protected := r.Group("/api")
-	protected.Use(middlewares.AuthMiddleware())
-	{
-		protected.GET("/users", handlers.GetUsers) // 查詢清單現在需要 Token 了！
-
-		protected.POST("/tasks", handlers.CreateTask)
-		protected.GET("/tasks", handlers.GetTasks)
+	// 2. 初始化資料庫
+	if err := database.Init(getenv("DB_PATH", "app.db")); err != nil {
+		log.Fatal(err)
 	}
 
 	// 3. 啟動伺服器
-	r.Run(":8080")
+	r := router.New()
+	if err := r.Run(":" + getenv("PORT", "8080")); err != nil {
+		log.Fatal(err)
+	}
 }

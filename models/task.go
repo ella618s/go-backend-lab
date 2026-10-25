@@ -2,11 +2,12 @@ package models
 
 import "gorm.io/gorm"
 
+// Task 屬於某一位使用者（UserID 外鍵）。
+// UserID 一律由 Token 決定，不接受用戶端在請求內容裡指定。
 type Task struct {
 	gorm.Model
-	Title       string `json:"title" binding:"required"` // 任務標題（必填）
-	Description string `json:"description"`              // 任務描述
-	Status      string `json:"status"`                   // 狀態 (例如: pending / done)
-	UserID      uint   `json:"user_id"`                  // 外鍵：對應到使用者的 ID
-	User        User   `json:"user"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status" gorm:"default:pending"` // pending / done
+	UserID      uint   `json:"user_id" gorm:"index;not null"`
 }

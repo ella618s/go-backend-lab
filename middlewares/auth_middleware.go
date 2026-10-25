@@ -1,56 +1,76 @@
 package middlewares
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var JwtSecret = []byte("my_super_secret_key_for_japan_market")
+// ContextUserID 是放在 gin.Context 裡的使用者 ID 的 key。
+const ContextUserID = "userID"
 
+const minSecretLength = 32
+
+var jwtSecret []byte
+
+// SetJWTSecret 設定簽發與驗證 Token 用的密鑰。
+// 密鑰必須從環境變數取得，不可寫死在程式碼裡，長度至少 32 字元。
+func SetJWTSecret(secret string) error {
+	if len(secret) < minSecretLength {
+		return errors.New("JWT_SECRET 未設定或長度不足 32 字元")
+	}
+	jwtSecret = []byte(secret)
+	return nil
+}
+
+// SignToken 簽發一組帶有效期限的 JWT，payload 只放 user_id 與 email，不放敏感資料。
+func SignToken(userID uint, email string, ttl time.Duration) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"email":   email,
+		"exp":     time.Now().Add(ttl).Unix(),
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
+}
+
+func unauthorized(c *gin.Context, msg string) {
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": msg})
+}
+
+// AuthMiddleware 驗證 Authorization: Bearer <token>，通過後把 user_id 放進 Context。
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. 從 HTTP Header 的 Authorization 欄位拿 Token
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未提供授權憑證 (Authorization Header missing)"})
-			c.Abort()
+		parts := strings.Fields(c.GetHeader("Authorization"))
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			unauthorized(c, "請提供 Authorization: Bearer <token>")
 			return
 		}
 
-		// 2. 格式切割
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token 格式錯誤，應為 Bearer <token>"})
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
-
-		// 3. 解析並驗證 Token (使用 MapClaims 來讀取裡面的資料)
 		claims := jwt.MapClaims{}
-		token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
-			return JwtSecret, nil
-		})
-
+		token, err := jwt.ParseWithClaims(
+			parts[1],
+			claims,
+			func(t *jwt.Token) (interface{}, error) { return jwtSecret, nil },
+			jwt.WithValidMethods([]string{"HS256"}), // 只接受 HS256，避免演算法被竄改
+			jwt.WithExpirationRequired(),            // 沒有過期時間的 Token 一律拒絕
+		)
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token 無效或已過期"})
-			c.Abort()
+			unauthorized(c, "Token 無效或已過期")
 			return
 		}
 
-		// 4. ✨ 關鍵：從 Token 的 Claims 中把 user_id 取出來，並塞進 Context
-		// (因為 JSON 解析出來的數字預設會是 float64，我們把它轉成 uint)
-		if userIdFloat, ok := claims["user_id"].(float64); ok {
-			c.Set("userID", uint(userIdFloat))
-		} else if userIdUint, ok := claims["userID"].(uint); ok {
-			c.Set("userID", userIdUint)
+		// JSON 數字解析出來是 float64，轉回 uint
+		userID, ok := claims["user_id"].(float64)
+		if !ok || userID <= 0 {
+			unauthorized(c, "Token 內容不完整")
+			return
 		}
 
-		// 5. 驗證通過，放行！
+		c.Set(ContextUserID, uint(userID))
 		c.Next()
 	}
 }

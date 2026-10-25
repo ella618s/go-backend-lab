@@ -9,77 +9,86 @@ import (
 	"go-backend-lab/models"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
+const tokenTTL = 2 * time.Hour
+
+// registerInput 只列出「允許用戶端填寫」的欄位。
+// 不直接綁定 models.User，這樣用戶端就沒辦法自己指定 Role 之類的欄位（mass assignment）。
+// bcrypt 只處理前 72 bytes，所以密碼上限設 72。
+type registerInput struct {
+	Name     string `json:"name" binding:"required,max=100"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
+}
+
+type loginInput struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
 // Register 註冊帳號
 func Register(c *gin.Context) {
-	var user models.User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	var in registerInput
+	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 1. 將明文密碼進行 bcrypt 雜湊加密
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	var count int64
+	database.DB.Model(&models.User{}).Where("email = ?", in.Email).Count(&count)
+	if count > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "此 Email 已被註冊"})
+		return
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "密碼加密失敗"})
 		return
 	}
-	user.Password = string(hashedPassword)
 
-	// 2. 存入資料庫
-	if result := database.DB.Create(&user); result.Error != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "註冊失敗，Email 可能已被註冊"})
+	user := models.User{
+		Name:     in.Name,
+		Email:    in.Email,
+		Password: string(hashed),
+		Role:     "user", // 角色由伺服器決定，不接受用戶端指定
+	}
+	if err := database.DB.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "建立帳號失敗"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "註冊成功！", "email": user.Email})
+	c.JSON(http.StatusCreated, gin.H{"message": "註冊成功", "email": user.Email})
 }
 
 // Login 登入並發放 JWT Token
 func Login(c *gin.Context) {
-	var loginBody struct {
-		Email    string `json:"email" binding:"required,email"`
-		Password string `json:"password" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&loginBody); err != nil {
+	var in loginInput
+	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 1. 在資料庫尋找使用者
+	// 帳號不存在與密碼錯誤回傳同一則訊息，避免讓人探測哪些 Email 已註冊
+	const invalid = "帳號或密碼錯誤"
+
 	var user models.User
-	if result := database.DB.Where("email = ?", loginBody.Email).First(&user); result.Error != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "帳號或密碼錯誤"})
+	if err := database.DB.Where("email = ?", in.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": invalid})
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(in.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": invalid})
 		return
 	}
 
-	// 2. 比對密碼是否正確
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginBody.Password))
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "帳號或密碼錯誤"})
-		return
-	}
-
-	// 3. 密碼正確，簽發 JWT Token (設定 2 小時後過期)
-	claims := jwt.MapClaims{
-		"user_id": user.ID, // ✨ 加上這行，把使用者 ID 裝進 Token 裡面！
-		"email":   user.Email,
-		"exp":     time.Now().Add(time.Hour * 2).Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(middlewares.JwtSecret)
+	token, err := middlewares.SignToken(user.ID, user.Email, tokenTTL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token 產生失敗"})
 		return
 	}
 
-	// 4. 回傳 Token 給前端
-	c.JSON(http.StatusOK, gin.H{
-		"message": "登入成功！",
-		"token":   tokenString,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "登入成功", "token": token})
 }
