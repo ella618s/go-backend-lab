@@ -2,12 +2,12 @@
 
 使用 Go（Gin、GORM）實作的 RESTful API 練習專案：使用者註冊與登入、JWT 認證、任務管理，並確保每位使用者只能存取自己的資料。
 
-> 這是學習用專案，目前使用 SQLite。下一步規劃改用 PostgreSQL 與 Docker Compose。
+> > 這是學習用專案。預設用 Docker Compose 啟動 PostgreSQL；沒有設定 `DATABASE_URL` 時，會改用本機 SQLite，方便直接 `go run`。
 
 ## 技術
 
 - Go、Gin（HTTP 路由與輸入驗證）
-- GORM + SQLite
+- GORM + PostgreSQL（Docker Compose）／SQLite（本機開發與測試）
 - JWT（`golang-jwt/jwt/v5`）、bcrypt 密碼雜湊
 - `net/http/httptest` 的 API 測試
 - Dockerfile（多階段建置）
@@ -42,15 +42,29 @@ go run .
 | 名稱 | 必填 | 說明 |
 | --- | --- | --- |
 | `JWT_SECRET` | 是 | 簽發與驗證 Token 的密鑰，至少 32 字元，沒設定程式不會啟動 |
+| `DATABASE_URL` | 否 | PostgreSQL 連線字串；有設定就用 PostgreSQL，沒設定則用 SQLite |
+| `POSTGRES_PASSWORD` | 用 Compose 時必填 | PostgreSQL 密碼，由 Compose 讀取 `.env` |
 | `DB_PATH` | 否 | SQLite 檔案路徑，預設 `app.db` |
 | `PORT` | 否 | 監聽埠，預設 `8080` |
 
-### 用 Docker 執行
+### 用 Docker Compose 執行（PostgreSQL）
 
 ```bash
-docker build -t go-backend-lab .
-docker run --rm -p 8080:8080 -e JWT_SECRET=$(openssl rand -hex 32) go-backend-lab
+# 1. 建立 .env（包含 JWT_SECRET 與資料庫密碼，不會提交到 Git）
+printf "JWT_SECRET=%s\nPOSTGRES_PASSWORD=%s\n" "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" > .env
+
+# 2. 啟動 app 與 PostgreSQL
+docker compose up -d --build
+
+# 3. 查看狀態與紀錄
+docker compose ps
+docker compose logs app
+
+# 停止（資料保留在 volume）
+docker compose down
 ```
+
+資料庫資料存在 Docker volume `pgdata`，容器重啟不會消失。電腦睡眠或 Docker Desktop 關閉後，再執行 `docker compose up -d` 即可恢復。
 
 ### 執行測試
 
@@ -107,7 +121,7 @@ curl localhost:8080/api/tasks -H "Authorization: Bearer $TOKEN"
 
 ## 已知限制與規劃
 
-- [ ] 改用 PostgreSQL，並以 Docker Compose 啟動 app 與資料庫
+- [x] 改用 PostgreSQL，並以 Docker Compose 啟動 app 與資料庫
 - [ ] 分頁、統一的錯誤回應格式、結構化 log
 - [ ] GitHub Actions 自動執行測試
 - [ ] Refresh Token 與登入失敗次數限制

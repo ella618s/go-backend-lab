@@ -23,7 +23,12 @@ func main() {
 	}
 
 	// 2. 初始化資料庫
-	if err := database.Init(getenv("DB_PATH", "app.db")); err != nil {
+	// 有設定 DATABASE_URL 就用 PostgreSQL，否則用本機 SQLite
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		if err := database.InitPostgres(url); err != nil {
+			log.Fatal(err)
+		}
+	} else if err := database.Init(getenv("DB_PATH", "app.db")); err != nil {
 		log.Fatal(err)
 	}
 
