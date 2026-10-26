@@ -1,5 +1,8 @@
 # go-backend-lab
 
+[![CI](https://github.com/ella618s/go-backend-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/ella618s/go-backend-lab/actions/workflows/ci.yml)
+
+
 使用 Go（Gin、GORM）實作的 RESTful API 練習專案：使用者註冊與登入、JWT 認證、任務管理，並確保每位使用者只能存取自己的資料。
 
 > > 這是學習用專案。預設用 Docker Compose 啟動 PostgreSQL；沒有設定 `DATABASE_URL` 時，會改用本機 SQLite，方便直接 `go run`。
