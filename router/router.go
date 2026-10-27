@@ -1,6 +1,7 @@
 package router
 
 import (
+	"go-backend-lab/chat"
 	"go-backend-lab/handlers"
 	"go-backend-lab/middlewares"
 
@@ -12,11 +13,20 @@ import (
 func New() *gin.Engine {
 	r := gin.Default()
 
+	// 聊天室：Hub 在背景 goroutine 裡處理所有連線的加入、離開與廣播
+	hub := chat.NewHub()
+	go hub.Run()
+
+	r.GET("/chat", handlers.ChatPage)
+
 	api := r.Group("/api")
 
 	// 公開路由：不需要 Token
 	api.POST("/register", handlers.Register)
 	api.POST("/login", handlers.Login)
+
+	// WebSocket 聊天室：Token 從 ?token= 帶入，仍然要通過 AuthMiddleware
+	api.GET("/ws", middlewares.TokenFromQuery(), middlewares.AuthMiddleware(), handlers.ChatWS(hub))
 
 	// 受保護路由：必須通過 AuthMiddleware
 	protected := api.Group("")

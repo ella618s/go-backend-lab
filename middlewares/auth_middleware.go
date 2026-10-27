@@ -74,3 +74,17 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// TokenFromQuery 讓 WebSocket 能用 ?token=... 帶 Token。
+// 瀏覽器的 WebSocket API 沒辦法自訂 Authorization 標頭，所以只有 /ws 這條路由使用它。
+// 注意：網址會出現在伺服器 log 裡，所以 Token 有效期要短；正式環境可改用一次性 ticket。
+func TokenFromQuery() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetHeader("Authorization") == "" {
+			if t := c.Query("token"); t != "" {
+				c.Request.Header.Set("Authorization", "Bearer "+t)
+			}
+		}
+		c.Next()
+	}
+}
