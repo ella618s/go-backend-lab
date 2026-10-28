@@ -14,6 +14,8 @@
 - JWT（`golang-jwt/jwt/v5`）、bcrypt 密碼雜湊
 - `net/http/httptest` 的 API 測試
 - Dockerfile（多階段建置）
+- WebSocket 聊天室（gorilla/websocket，Hub 模式，goroutine + channel）
+- Redis 快取（Cache-Aside）
 
 ## 專案結構
 
@@ -49,6 +51,7 @@ go run .
 | `POSTGRES_PASSWORD` | 用 Compose 時必填 | PostgreSQL 密碼，由 Compose 讀取 `.env` |
 | `DB_PATH` | 否 | SQLite 檔案路徑，預設 `app.db` |
 | `PORT` | 否 | 監聽埠，預設 `8080` |
+| `REDIS_ADDR` | 否 | Redis 位址（例如 `redis:6379`）；沒設定或連不上就不使用快取 |
 
 ### 用 Docker Compose 執行（PostgreSQL）
 
@@ -91,6 +94,8 @@ go test ./...
 | PUT | `/api/tasks/:id` | 修改自己的任務 |
 | DELETE | `/api/tasks/:id` | 刪除自己的任務 |
 | POST | `/api/heavy-task` | 示範 goroutine 背景任務，同時最多 5 個 |
+| GET | `/chat` | 聊天室測試頁面 |
+| GET | `/api/ws` | WebSocket 聊天室，Token 以 `?token=` 帶入 |
 
 ### 範例
 
@@ -121,11 +126,15 @@ curl localhost:8080/api/tasks -H "Authorization: Bearer $TOKEN"
 - **資料隔離**：任務的所有查詢、修改、刪除都同時帶 `user_id = ?`，`user_id` 一律取自 Token，不接受用戶端傳入。別人的任務一律回 404，不透露其是否存在。
 - **輸入驗證**：註冊與任務使用獨立的輸入結構（只開放允許的欄位），避免用戶端自行指定 `role`、`user_id` 等欄位。
 - **測試**：用記憶體資料庫測試註冊驗證、未授權存取、密碼不外洩、不能自選角色、使用者之間的資料隔離。
+- **快取**：`GET /api/tasks` 使用 Cache-Aside，快取 60 秒；新增、修改、刪除任務時清除該使用者的快取。每位使用者獨立的 key，不會互相影響。Redis 不可用時自動退回直接查資料庫。
+- **聊天室**：用單一 Hub goroutine 管理所有連線，以 channel 傳遞加入、離開與廣播，不需要加鎖；限制訊息大小與長度，並定期 ping 偵測斷線。
 
 ## 已知限制與規劃
 
 - [x] 改用 PostgreSQL，並以 Docker Compose 啟動 app 與資料庫
+- [x] GitHub Actions 自動建置與執行測試
+- [ ] 聊天室與 Redis 快取的自動化測試
+- [ ] 聊天室訊息保存（例如存入資料庫或 Redis）
 - [ ] 分頁、統一的錯誤回應格式、結構化 log
-- [ ] GitHub Actions 自動執行測試
 - [ ] Refresh Token 與登入失敗次數限制
 - [ ] API 文件（Swagger 或 Postman collection）
