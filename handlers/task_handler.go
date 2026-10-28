@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"go-backend-lab/cache"
 	"go-backend-lab/database"
 	"go-backend-lab/middlewares"
 	"go-backend-lab/models"
@@ -62,6 +64,7 @@ func CreateTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "建立任務失敗"})
 		return
 	}
+	cache.InvalidateTasks(c.Request.Context(), userID)
 
 	c.JSON(http.StatusCreated, gin.H{"message": "新增任務成功", "task": task})
 }
@@ -73,8 +76,27 @@ func GetTasks(c *gin.Context) {
 		return
 	}
 
+	status := c.Query("status")
+
+	// 只快取合法的篩選值，避免有人用亂填的 status 在 Redis 塞出大量無用的資料
+	field := "all"
+	cacheable := status == ""
+	if status == "pending" || status == "done" {
+		field = status
+		cacheable = true
+	}
+
+	// Cache-Aside：先看快取有沒有，有就直接回傳
+	if cacheable {
+		if data, hit := cache.GetTasks(c.Request.Context(), userID, field); hit {
+			c.Header("X-Cache", "HIT")
+			c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+			return
+		}
+	}
+
 	query := database.DB.Where("user_id = ?", userID)
-	if status := c.Query("status"); status != "" {
+	if status != "" {
 		query = query.Where("status = ?", status)
 	}
 
@@ -84,7 +106,17 @@ func GetTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"count": len(tasks), "tasks": tasks})
+	body, err := json.Marshal(gin.H{"count": len(tasks), "tasks": tasks})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "回應格式化失敗"})
+		return
+	}
+	if cacheable {
+		cache.SetTasks(c.Request.Context(), userID, field, body)
+	}
+
+	c.Header("X-Cache", "MISS")
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
 }
 
 // UpdateTask 修改自己的任務。
@@ -126,6 +158,7 @@ func UpdateTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新任務失敗"})
 		return
 	}
+	cache.InvalidateTasks(c.Request.Context(), userID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "更新任務成功", "task": task})
 }
@@ -151,6 +184,7 @@ func DeleteTask(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "找不到任務"})
 		return
 	}
+	cache.InvalidateTasks(c.Request.Context(), userID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "刪除任務成功"})
 }
