@@ -133,7 +133,7 @@ curl localhost:8080/api/tasks -H "Authorization: Bearer $TOKEN"
 
 - [x] 改用 PostgreSQL，並以 Docker Compose 啟動 app 與資料庫
 - [x] GitHub Actions 自動建置與執行測試
-- [ ] 聊天室與 Redis 快取的自動化測試
+- [x] 聊天室與 Redis 快取的自動化測試
 - [ ] 聊天室訊息保存（例如存入資料庫或 Redis）
 - [ ] 分頁、統一的錯誤回應格式、結構化 log
 - [ ] Refresh Token 與登入失敗次數限制
